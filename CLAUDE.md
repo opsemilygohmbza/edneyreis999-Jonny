@@ -4,101 +4,148 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-This is **not a software project** — it is a personal AI-agent workspace. There is no application to build, lint, test, or run. The repo holds:
+This is an **RPG Maker MZ game project** called "Jhonny". It is a complete game with its own engine, assets, and data files that can be deployed as a standalone application or web game.
 
-1. **Obsidian vault** at `docs/` — Zettelkasten-lite notes (`00-Inbox/`, `01-Notes/`, `99-Meta/templates/`). Open it in Obsidian via *Open folder as vault* → `docs/`.
-2. **Claude Code configuration** at `.claude/` — agents, slash commands, rules, skills, templates, scripts, settings.
-3. **AgentOps-style session artifacts** at `.agents/` — handoffs, environment, logs, learnings, plans.
+## Running the game
 
-Treat the workspace as a config root, not a codebase. Most "work" here is reading/editing markdown, JSON, YAML inside these three trees.
+To test changes during development, open `index.html` in a web browser. For full playtesting with save/load functionality, run through a local server:
+```bash
+# Python 3
+python3 -m http.server 8000
+# Then open http://localhost:8000
 
-## Project routing: `Jhonny/`
+# Node.js (with npx)
+npx serve .
+# Then open the URL shown in terminal
+```
 
-`Jhonny/` is an exception to the workspace-level "not a software project" rule: it is a real RPG Maker MZ game project. When a task targets `Jhonny/`, follow `Jhonny/CLAUDE.md` first and treat that folder as the project root.
+The game can also be deployed as an Electron/NW.js desktop app using `package.json`.
 
-For RPG Maker MZ work, prefer loading the matching skill before implementation:
-- `rpg-maker-mz-data-json` for edits to `data/*.json`, Database IDs, switches, variables, Common Events, and RPG Maker command lists.
-- `rpg-maker-mz-plugin-workflow` for creating or editing plugins under `js/plugins/`.
+## Architecture
 
-Keep project-specific conventions in `Jhonny/CLAUDE.md` rather than in global skills. Use skills for RPG Maker MZ mechanics that would apply across projects.
+### Script Loading Pipeline (`main.js`)
 
-## Critical: `.agents/` is deny-by-default
+Scripts load in strict order:
+1. **Libraries**: pixi.js (rendering), pako (compression), localforage (storage), effekseer (effects), vorbisdecoder (audio)
+2. **Core Engine**: `rmmz_core.js` → `rmmz_managers.js` → `rmmz_objects.js` → `rmmz_scenes.js` → `rmmz_sprites.js` → `rmmz_windows.js`
+3. **Plugins**: `plugins.js` (generated, lists active plugins)
+4. **Bootstrap**: `SceneManager.run(Scene_Boot)` starts the game
 
-`.agents/.gitignore` is `*` with only itself allowed. **Never stage, commit, or copy artifacts from `.agents/`** into git history or other directories. Session handoffs, logs, environment snapshots, learnings, and plans under `.agents/` are ephemeral and local-only.
+### RPG Maker MZ Core Structure
 
-## Git state
+The engine is split into modular files:
 
-The repo is **currently not a git repository** (no `.git/`). If initializing/committing later, follow the global `~/.claude/CLAUDE.md`:
-- Author: `Edney <edney_reis999@hotmail.com>`
-- **Never add `Co-authored-by` lines** (no Claude attribution, no exceptions).
-- Use Conventional Commits format.
+- **rmmz_core.js**: Base classes (`Utils`, `AudioManager`, `ImageManager`, `SceneManager`, `StorageManager`)
+- **rmmz_managers.js**: Game state managers (`DataManager`, `BattleManager`, `PluginManager`, etc.)
+- **rmmz_objects.js**: Game logic objects (`Game_Actor`, `Game_Enemy`, `Game_Event`, `Game_Map`, etc.)
+- **rmmz_scenes.js**: Scene controllers (`Scene_Map`, `Scene_Battle`, `Scene_Menu`, etc.)
+- **rmmz_sprites.js**: Visual representations (`Sprite_Character`, `Sprite_Battler`, etc.)
+- **rmmz_windows.js**: UI components (`Window_Base`, `Window_Command`, `Window_Message`, etc.)
 
-## Settings & environment
+### Data Layer (`data/*.json`)
 
-- `.claude/settings.json` — shared config. Points the Anthropic client at the **z.ai GLM proxy** (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`): opus/sonnet → `glm-5.1`, haiku → `glm-4.5-air`. Hooks run `bd prime` on `SessionStart` and `PreCompact` (refreshes the beads dependency graph).
-- `.claude/settings.local.json` — local allowlist of pre-approved bash permissions (`npm test/run`, `rg`, `find`, `grep`, `npx eslint/tsc`, `python3 *`, `bd memories *`, plus the `sequential-thinking` and `context7` MCP tools). Don't move these to shared settings without reason.
-- `.claude/ativa-glm.md` — instructions to add GLM env vars to `settings.local.json` (a one-off note, not a live config file).
-- `skills-lock.json` — pinned skill sources. Currently locks `pptx` from `anthropics/skills` on GitHub. Other skills under `.claude/skills/` are local (not locked).
+Game data is stored as JSON files that define:
+- **Actors**: Player characters with stats, equipment, skills
+- **Classes**: Character class templates (growth rates, learned skills)
+- **Skills, Items, Weapons, Armors**: Database entries with effects and pricing
+- **Enemies**: Monster stats, drop tables, action patterns
+- **Troops**: Enemy groups for battle formations
+- **Maps**: Map data (Map001.json, etc.) with tile placement and events
+- **System**: Global game settings, terms, UI preferences
+- **CommonEvents**: Reusable event scripts
+- **States**: Status effects (poison, sleep, etc.)
+- **Animations**: Visual effect sequences
+- **Tilesets**: Tile graphics and passability settings
 
-## MCP servers available
+**Important**: JSON files are read-only at runtime. Never modify these files directly while the game is running.
 
-- **serena** — semantic code navigation (`find_symbol`, `find_referencing_symbols`, `get_symbols_overview`). For real codebases only.
-- **pal** — multi-model chat/council/consensus/thinkdeep/debug/codereview. When the user names a model, pass it through verbatim.
-- **perplexity** — `perplexity_ask` (quick cited answers), `perplexity_reason` (step-by-step), `perplexity_research` (slow multi-source), `perplexity_search` (URL list).
-- **context7** — current library/framework docs. Use for any library question, even familiar ones (training data may be stale). Resolve library ID first, then query.
-- **chrome-devtools / playwright / claude-in-chrome** — browser automation (three alternatives; pick what the task needs).
+### Plugin System (`js/plugins/`)
 
-## Skills-First pattern (load-bearing convention)
+Plugins extend or override core functionality. Each plugin is an IIFE that patches prototype methods or adds new classes. The project includes official plugins:
+- **AltMenuScreen.js**: Changes menu layout (commands top, status bottom)
+- **AltSaveScreen.js**: Custom save/load screen
+- **ButtonPicture.js**: Picture-based button handling
+- **TextPicture.js**: Display text in pictures
 
-Agents in `.claude/agents/` are explicitly instructed to **invoke skills via the `Skill` tool rather than re-derive domain knowledge**. When implementing anything that touches a skill's domain (NestJS, Next.js, PixiJS, TypeScript, tests, git commits, RPG Maker MZ), invoke the matching skill first.
+To add a plugin:
+1. Place `.js` file in `js/plugins/`
+2. Register in `plugins.js` (or use RPG Maker MZ editor to manage)
+3. Follow RPG Maker MZ plugin format with `@target MZ`, `@plugindesc`, `@help` tags
 
-Skill families under `.claude/skills/`:
-- **Process / standards**: `standards` (library tier — loaded by other skills), `shared`, `git-commit-helper`, `task-onboarding`, `post-mortem`, `council`, `find-skills`, `skill-creator`, `skill-description-generator`.
-- **Backend**: `nestjs-architect`, `docker-nestjs-dev`, `MODE_Backend_TDD`, `fakebuilder-generator`, plus test-layer skills (`test-core-layer`, `test-service-layer`, `test-controller-layer`, `test-integration`, `test-e2e-playwright`) and `test-orchestrator`.
-- **Frontend**: `nextjs-architect`, `typescript-expert`, `react-electron-code-health`, plus the full `pixijs-*` family (v8).
-- **RPG Maker MZ ("Daratrine")**: `brainstorm-character`, `notetag-filler`, `visustella-analyst`, `state-tooltip-generator`, `skill-description-generator`.
-- **RPG Maker MZ project workflow**: `rpg-maker-mz-data-json`, `rpg-maker-mz-plugin-workflow`.
-- **Tracker**: `beads` (graph-based issue tracker via the `bd` CLI — pairs with the `bd prime` hook).
-- **External**: `pptx` (locked via `skills-lock.json`).
+### Localization
 
-Each skill has its own `SKILL.md` with frontmatter declaring tier, dependencies, and output contract. Library-tier skills (`standards`, `shared`, `beads`) are loaded by other skills, not used standalone.
+The game uses **Portuguese (pt_BR)** locale. All UI strings, database entries, and messages should be in Portuguese. Translation keys are in `System.json` under `terms` and `messages`.
 
-## Slash commands
+### Development Plans (`planos/`)
 
-Namespaced under `.claude/commands/`:
-- **`zord:*`** — software-dev process: `criar-prd`, `criar-fdd`, `hld-generator`, `generate-technical-analysis`, `generate-action-plan`, `run-plan`, `enrich-tasks`, `catalogar`, `catalogar-doc-tecnica`, `code-health`, `doc-trace`, `entrevistador`, `prompt-otimizer`, `test-diagnose`, `test-health`, `troubleshoot`. These produce artifacts that belong in feature folders (PRD → TechSpec → HLD → tasks-xml → execution).
-- **`loki:*`** — RPG Maker MZ / Daratrine: `brainstorm-phase-1-create-boss`, `brainstorm-phase-2-detail-boss`, `criar-nsd`, `tech-analysis`, `implementar-enemy`, `ai-enemy-optimizer`, `action-sequence-generator`, `visustella-add-postmortem`.
+The `planos/` directory contains development plans and prototypes. Each plan folder (e.g., `001-prototipo-core-loop`) may contain:
+- Design documents
+- Prototype code
+- Test scenarios
+- Implementation notes
 
-## Templates
+For `planos/001-prototipo-core-loop/`, if `tasks.md` and task-specific files already exist, execute from the existing plan instead of re-planning the phase. Read the phase tasks, implement directly, and record completion/validation in Markdown files inside the plan folder.
 
-`.claude/templates/` holds XML/markdown skeletons the slash commands render against: `prd` (via command), `techspec-template.xml`, `nsd-template.xml`, `nsd-technical-analysis-template.xml`, `base-action-sequence-template-v2.xml`, `task-template.md`, `tasks-template.md`, `task-xml-template.xml`, `tasks-xml-template.xml`, `task-completeness-model.xml`, `analysis-export-template.xml`.
+When a task references a phase retrospectiva, treat it as reusable execution knowledge. Fase 1 and Fase 2 confirmed several project rules:
+- The actual project path is `Jhonny/`, not `docs/Jhonny/`.
+- Core-loop minigame variables and switches use the 101+ ID range to avoid collisions with early Database entries.
+- Validation that depends on the engine, visuals, input, picture loading, audio playback, or Common Events requires RPG Maker MZ Playtest confirmation.
+- Do not mark a phase as "validada" until the user confirms Playtest results.
 
-## Coding rules (`.claude/rules/basci-rules.json`)
+## Durable project docs
 
-Apply these whenever writing or reviewing code in any project rooted here:
-- **Language**: identifiers, error messages, and logs in English (no mixed idioms like `getUsuarioName`).
-- **Naming**: `camelCase` for methods/functions/vars, `PascalCase` for classes/interfaces, `kebab-case` for files/dirs. Booleans start with `is/has/can/should/was`. Names ≤ 30 chars, no abbreviations.
-- **Functions**: ≤ 50 lines, single responsibility, ≤ 3 params (else use a typed options object), no boolean flag params, no side effects in queries, declare variables near use.
-- **Control flow**: ≤ 2 nesting levels (prefer early return), avoid `else` when return is clearer, don't use try/catch for normal flow.
-- **Classes**: ≤ 300 lines, prefer composition over inheritance, apply DIP at use cases and interface adapters, constructors do no I/O, no exposed mutable state.
-- **TypeScript**: `any` is banned (use `unknown` + narrowing), avoid `as` and `!`, prefer discriminated unions, validate external input at runtime before it enters the core.
-- **Immutability**: `const` by default, never mutate function params or shared arrays/objects.
-- **Imports**: external → internal → relative; avoid barrel `index.ts` if it creates cycles.
-- **Logging**: `winston` only — **no `console.log`/`console.error`**, no sensitive data (names, addresses, cards, tokens), structured objects with consistent context (`requestId`, `userId`, `orgId`).
-- **Async**: don't mix `.then/.catch` with `async/await`, avoid `forEach(async ...)` (use `for..of` or `Promise.all`), no fire-and-forget without explicit tracking.
-- **Errors**: never swallow exceptions; log + rethrow or translate to a domain error.
-- **Comments**: default to none. Comment only non-obvious contracts/decisions (in JSDoc). No comments inside function bodies, no blank lines inside methods.
-- **Tests**: every bug fix gets a regression test that would have failed before. Test behavior, not implementation. Never disable lint rules without justification and scoped `eslint-disable-next-line`.
-- **Magic numbers**: extract to named constants.
+Before changing race runtime, Common Events, data JSON, helper plugins, thresholds, retry, result screen, or debug probes, consult `../docs/index.xml` first. Key durable docs:
+- `../docs/02-Core-Loop/Corrida - Core Loop.md` for mechanics, thresholds, variables and switches.
+- `../docs/02-Core-Loop/Corrida - Runtime e Eventos.md` for Common Event lifecycle, `SW_RACE_ACTIVE`, `SW_INPUT_LOCKED`, `command117`, retry and result-screen contracts.
+- `../docs/03-Tech/RPG Maker MZ - Debug Playtest.md` for Playtest/debug evidence, F12 visibility, snapshots and log probes.
 
-## Agents (`.claude/agents/`)
+Keep detailed runtime rules in `docs/`; keep this file as routing and project constraints.
 
-Subagents available via the Agent tool, each scoped to a role:
-- `backend-nestjs-developer`, `frontend-nextjs-developer`, `typescript-pro`, `prompt-engineer` — implementation, skills-first.
-- `nestjs`/`react-electron`/`test-e2e` analysts: `implementation-analyzer`, `test-analyzer`, `techspec-generator`, `test-orchestrator`.
-- `Software Engineer` (CTO-facing reviewer, opus-tier), `Plan` (architect), `Explore` (fast read-only search), `general-purpose`, `claude-code-guide`, `statusline-setup`.
-- Domain: `bibliotecario` + `catalogador` (doc-index navigation), `agentops:code-reviewer`, `agentops:researcher`.
+## File Modification Guidelines
 
-## Obsidian vault editing
+### When modifying core engine files (`rmmz_*.js`):
+- Use prototype patching, not direct class replacement
+- Preserve backward compatibility with save files
+- Test both in browser and desktop deployment
+- Document breaking changes
 
-When editing `.md` files under `docs/` (or when the user mentions wikilinks, callouts, frontmatter, embeds, bases, or canvas): prefer the `obsidian-markdown`, `obsidian-cli`, `obsidian-bases`, and `json-canvas` skills over hand-rolling syntax. The vault uses prefix-ordered folders (`00-` to `99-`) for alphabetic ordering — match the existing convention when adding folders.
+### When editing data files (`data/*.json`):
+- Use RPG Maker MZ editor for database changes (actors, items, skills, etc.)
+- For automated edits, validate JSON structure before committing
+- Map files (Map*.json) have complex structure—prefer editor tools
+- For `System.json`, arrays such as `variables` and `switches` are 0-based: editor ID 101 is array index 100.
+- For structured JSON edits, use a JSON parser/writer rather than textual replacement. RPG Maker JSON may be minified or have large one-line arrays.
+- Common Events with simple, known commands may be created in `CommonEvents.json` if an empty slot is confirmed and the result is validated in Playtest.
+- Prefer writing formatted JSON with stable indentation to avoid noisy diffs.
+
+### When writing plugins:
+- Never directly modify `rmmz_*.js` files—use plugins instead
+- Use strict mode and wrap in IIFE
+- Provide `@help` documentation in both English
+- Support plugin parameters for user configuration
+- Check for method existence before patching (plugin compatibility)
+- For project helper plugins, `@target MZ`, `@plugindesc`, and `@help` are required. Validate syntax with `node -c`.
+- The RPG Maker MZ Plugin Manager is GUI-driven. If activation cannot be represented safely in files, provide concise manual instructions for the user.
+
+## Game Configuration
+
+Key settings in `System.json`:
+- **Resolution**: 816×624 (default RPG Maker MZ)
+- **Window Opacity**: 192 (semi-transparent windows)
+- **Battle System**: 0 (front-view, not side-view)
+- **Autosave**: Enabled
+- **Start Position**: Map 1, coordinates (8, 6)
+
+## Asset Structure
+
+- `audio/`: BGM, BGS, ME, SE audio files
+- `img/`: Character sprites, battlebacks, pictures, system graphics
+- `fonts/`: Custom font files (mplus-2p-bold-sub.woff, mplus-1m-regular.woff)
+- `css/`: game.css for web deployment styling
+- `movies/`: OGV format cutscene videos
+- `effects/`: Effekseer effect files (.efkfmt)
+
+For the race core-loop prototype:
+- Pictures live in `img/pictures/race/`; RPG Maker picture names omit the file extension, for example `race/bg_sinal`.
+- Prefer default RPG Maker SE files already present under `audio/se/` before generating, downloading, or converting placeholder audio.
+- `EV_Preload` uses the validated pattern `Show Picture -> Wait 1 frame -> Erase Picture` to warm picture assets.
